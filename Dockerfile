@@ -25,4 +25,4 @@ ENV HF_HOME=/data/.huggingface
 
 EXPOSE 7860
 
-CMD ["sh","-c","gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:${PORT:-8080} app:app"]
+CMD ["sh","-c","gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:${PORT:-7860} app:app"]
