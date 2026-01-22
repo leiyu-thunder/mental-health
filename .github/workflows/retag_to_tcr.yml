@@ -7,6 +7,13 @@ jobs:
   retag:
     runs-on: ubuntu-latest
     steps:
+      - name: DNS debug
+        run: |
+          cat /etc/resolv.conf
+          getent hosts mental.tencentcloudcr.com || true
+          nslookup mental.tencentcloudcr.com || true
+          dig mental.tencentcloudcr.com A +short || true
+      
       - name: Login Docker Hub
         uses: docker/login-action@v3
         with:
