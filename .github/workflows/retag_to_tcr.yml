@@ -27,8 +27,8 @@ jobs:
       - name: Tag for TCR
         run: |
           docker tag ${{ secrets.DOCKERHUB_USERNAME }}/mental-health:latest \
-            ccr.ccs.tencentyun.com/mental/mental-health:latest
+            mental.tencentcloudcr.com/mental/mental-health:latest
 
       - name: Push to TCR
         run: |
-          docker push ccr.ccs.tencentyun.com/mental/mental-health:latest
+          docker push mental.tencentcloudcr.com/mental/mental-health:latest
