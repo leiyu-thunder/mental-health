@@ -1,0 +1,8 @@
+flask
+gunicorn
+opencv-python
+pillow
+numpy
+torch
+transformers
+mediapipe
