@@ -19,6 +19,7 @@ from mediapipe.tasks.python import vision as mp_vision
 # 0) 配置
 # =========================================================
 MODEL_ID = "mo-thecreator/vit-Facial-Expression-Recognition"
+MODEL_DIR = os.environ.get("MODEL_DIR", "/models/vit-fer")  # local, pre-downloaded at build time
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 SAMPLE_FPS = 5
@@ -60,8 +61,10 @@ MOUTH_LMS = [13, 14, 78, 308]
 # =========================================================
 # 1) ViT 表情模型加载
 # =========================================================
-processor = ViTImageProcessor.from_pretrained(MODEL_ID)
-vit_model = ViTForImageClassification.from_pretrained(MODEL_ID).to(DEVICE)
+if not os.path.isdir(MODEL_DIR):
+    raise RuntimeError("MODEL_DIR not found: %s. This service is configured for offline model loading. Build the image with the model pre-downloaded (see Dockerfile) or mount the model directory." % MODEL_DIR)
+processor = ViTImageProcessor.from_pretrained(MODEL_DIR, local_files_only=True)
+vit_model = ViTForImageClassification.from_pretrained(MODEL_DIR, local_files_only=True).to(DEVICE)
 vit_model.eval()
 ID2LABEL = vit_model.config.id2label
 
