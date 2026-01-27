@@ -15,6 +15,66 @@ import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
+import subprocess
+import json
+
+# -------------------------
+# Video probe & normalization
+# -------------------------
+def _run_cmd(cmd: list) -> str:
+    """Run a command and return stdout; raise RuntimeError with stderr on failure."""
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(f"Command failed: {' '.join(cmd)}\nSTDERR:\n{p.stderr}")
+    return p.stdout
+
+
+def ffprobe_video_info(path: str) -> dict:
+    """Probe real container/codec info (works even if suffix is misleading)."""
+    out = _run_cmd([
+        "ffprobe", "-v", "error",
+        "-print_format", "json",
+        "-show_format", "-show_streams",
+        path
+    ])
+    info = json.loads(out)
+
+    vstreams = [s for s in info.get("streams", []) if s.get("codec_type") == "video"]
+    if not vstreams:
+        raise RuntimeError("No video stream found by ffprobe.")
+    v0 = vstreams[0]
+    fmt = info.get("format", {}) or {}
+
+    return {
+        "format_name": fmt.get("format_name"),
+        "duration": fmt.get("duration"),
+        "size": fmt.get("size"),
+        "video_codec": v0.get("codec_name"),
+        "width": v0.get("width"),
+        "height": v0.get("height"),
+        "avg_frame_rate": v0.get("avg_frame_rate"),
+        "r_frame_rate": v0.get("r_frame_rate"),
+        "raw": info,
+    }
+
+
+def normalize_to_15fps_mp4(input_path: str, output_path: str) -> None:
+    """Standardize to CFR 15fps and re-encode to analysis-friendly H.264 MP4."""
+    _run_cmd([
+        "ffmpeg", "-y",
+        "-i", input_path,
+        # Force CFR=15 and make width/height even (required for yuv420p/h264)
+        "-vf", "fps=15,scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-vsync", "cfr",
+        "-an",
+        "-c:v", "libx264",
+        "-profile:v", "baseline",
+        "-pix_fmt", "yuv420p",
+        "-preset", "veryfast",
+        "-crf", "28",
+        output_path
+    ])
+
 # =========================================================
 # 0) 配置
 # =========================================================
@@ -806,6 +866,10 @@ def health():
 
 @app.route("/analyze_video", methods=["POST"])
 def analyze_video_api():
+    """
+    Accept uploaded video (often named .mp4), probe real codec/container,
+    normalize to CFR=15fps via ffmpeg, then run the analysis pipeline.
+    """
     if "video" not in request.files:
         return jsonify({"ok": False, "error": "missing video file"}), 400
 
@@ -817,22 +881,39 @@ def analyze_video_api():
     if not f.filename:
         return jsonify({"ok": False, "error": "empty filename"}), 400
 
-    suffix = os.path.splitext(f.filename)[1] or ".mp4"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+    # Save as .mp4 suffix (even if content is actually webm/vp9 etc.)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
         tmp.write(f.read())
         tmp_path = tmp.name
 
+    normalized_path = None
+    probe = None
     try:
-        raw = analyze(tmp_path)
+        # 1) Probe the REAL container/codec (do not trust suffix)
+        probe = ffprobe_video_info(tmp_path)
+
+        # 2) Normalize to 15fps CFR MP4 (H.264 baseline) before analysis
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as out:
+            normalized_path = out.name
+        normalize_to_15fps_mp4(tmp_path, normalized_path)
+
+        # 3) Run your existing analysis pipeline on the normalized file
+        raw = analyze(normalized_path)
         report = format_for_age(raw, age_group)
-        return jsonify({"ok": True, "report": report})
+
+        return jsonify({
+            "ok": True,
+            "report": report
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
     finally:
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
+        for p in (tmp_path, normalized_path):
+            if p:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":
